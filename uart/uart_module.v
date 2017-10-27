@@ -10,43 +10,61 @@ module uart_module(
 		
 						clk,
 						rst,
-						in,
-					
-						sdata,
-						state,
-						out
+						
+						EN,
+						data_in,
+//						sdata,
+						tx,
+						done
+						
+//						state,
+//						out
 		);
 		
 	input clk;
 	input rst;
-	input in;
+	input EN;
 	
-	output [7:0] out;
-	output sdata;
-	output [1:0] state;
+//	output [7:0] out;
+//	output [2:0] state;
 	
-	parameter IDLE    = 0;
-	parameter START   = 1;
-	parameter STOP    = 2;
-	parameter RECEIVE = 3;
+	input [7:0] data_in;
+	output done;	
+	output tx;
+	
+	reg done;
+	reg tx;
+	
+	parameter IDLE     = 0;
+	parameter START    = 1;
+	parameter STOP     = 2;
+	parameter TRANSFER = 4;
 	
 		
 	reg  in_shift;
 	wire clk_shift;
-//	wire stop_wire;
 	wire receive;
 	
 	wire divclk;
+	reg tx_ld;
+	wire rx_ld;
+	wire [7:0] tx_out;
 	
 	reg en_shift;
 	
 	reg start_req; 
-	reg stop_req;
-//	reg idle_req;
+	wire stop_req;
 
 	reg [7:0] cnt;
-	reg [1:0] curr_state;
-	reg [1:0] pre_state;
+	reg [2:0] pre_state;
+	
+	reg [7:0] tx_buffer; 
+	
+	
+	reg [7:0] data_g;
+
+//out[7:0] wire for debug
+//	assign out = tx_buffer;
 	
 	//div clk module.
 	
@@ -54,80 +72,124 @@ module uart_module(
 		.clk(clk),
 		.rst_n(rst),
 		
-		.div_clk(divclk)
+		.clkout(divclk)
 	
 	);
 	
-	
-	// shift registers module
-	shift_mode shift_module (
-		
-		.clk(divclk),
-		.dir_sel(1),
-		.in(in_shift),
-		.out(out),
-		.en(en_shift),
-		
-		.rst(rst)
-	);
- 
-	//assign stop_wire = out[]
 	
 	assign clk_shift = divclk;
-	assign state = curr_state;
+//	assign state = pre_state;
 	
 	assign receive = en_shift;
-	assign sdata = out[7];
-	
-	
-	//check the start signal.
-	always @(posedge divclk)
-	begin
-		in_shift <= in;
-		start_req <= in_shift && (~in)? 1:0;
+//	assign sdata = tx_buffer[0];
+		 
+/******************************************
 
+	data loader
+
+*******************************************/	
+	always @(posedge clk or negedge rst) begin
+		if (!rst) 
+			data_g <= 8'd0;
+		else if (EN && done)
+			data_g <= data_in;
 	end
 	
 	
+/******************************************
+	
+	TX buffer&shifter control & statements
+
+*******************************************/	
+	
+	shift_mode shift_tx (
+		
+		.clk(divclk),
+		.dir_sel(0),
+		.in(0),
+		.out(tx_out),
+		.en(en_shift),
+		.ld(tx_ld),
+		.in_parralle(tx_buffer),
+		
+		.rst(rst)
+	);
+	
+	//TX buffer initialization & assignment.
+	always @(posedge divclk or negedge rst) begin
+	
+	if(!rst)
+		begin
+			tx_buffer <= 8'd0;
+		end
+
+	else if(EN) begin
+	
+			case(pre_state)
+				
+				START:	  begin
+								tx_ld <= 1'b0;
+								tx_buffer <= (tx_buffer >> 1);
+								
+							  end
+							 
+				TRANSFER:  tx_buffer <= (tx_buffer >> 1);
+				
+				STOP:		  begin
+								 
+								 tx_buffer <= data_g;
+								 tx_ld <= 1'b1;
+								 
+							  end
+				
+			endcase
+		end
+	end
+		
 	
 	//enable the shift module.
-	always @(posedge divclk)
-	begin
-		if(stop_req)
+	always @(posedge divclk) begin
+		
+		if(pre_state == STOP)
 			en_shift <= 1'b0;
-		else if(start_req)
+		else if(pre_state == START)
 			en_shift <= 1'b1;
 		
 	end
 	
-	//initial the state machine.
+
+	
+	
+/*******************************************
+	
+		state signal generation.
+
+********************************************/
+	
+		
+//start signal generation.
 	always @(posedge divclk or negedge rst)
 	begin
 		if(!rst)
-		begin
-			curr_state <= IDLE; 
+			start_req <= 1'b0;
+		else begin
+			if(done && EN)
+				start_req <= 1'b1;
+			else
+				start_req <= 1'b0;
 		end
-		else
-		begin
-			curr_state <= pre_state;
-			
-		end	
-			
-	end
-
-
-	always @(posedge divclk)
-	begin
-	
-		// stop signal control. 	
-//		if((cnt == 8'd9) && (in_shift == 1'b1))
-//			stop_req <= 1'b1;
-//		else
-//			stop_req <= 1'b0;
-			stop_req  <= (cnt == 8'd9) && (in_shift == 1'b1)? 1:0;
 	end
 	
+//stop signal generation.
+//	always @(posedge divclk)
+//	begin
+//	
+	assign stop_req = (cnt == 8'd7)? 1:0;
+//	end
+
 	
+	
+	//cnt
 	always @(posedge divclk or negedge rst)
 	begin
 		if(!rst)
@@ -135,12 +197,22 @@ module uart_module(
 		
 		else if(pre_state == START)
 			cnt <= 0;
-		else if(pre_state == RECEIVE)
+		else if(pre_state == TRANSFER)
 			cnt <= cnt + 8'd1;
 
 	end
 	
-	//state machine.
+	
+	
+/*******************************************
+	
+		state machine part
+
+********************************************/
+	
+	
+	
+	//state machine transition.
 	always @(posedge divclk )
 	begin
 			
@@ -159,11 +231,11 @@ module uart_module(
 					
 			START: begin
 					
-						pre_state <= RECEIVE;
+						 pre_state <= TRANSFER;
 						
 					 end
 			
-			RECEIVE:begin
+			TRANSFER:begin
 						
 						if(stop_req)
 						begin
@@ -191,7 +263,70 @@ module uart_module(
 					
 	end
 	
+	//state machine actions
+	always @(posedge divclk or negedge rst)
+	begin
 		
+//		if(pre_state == START)
+//		begin
+//			tx <= 1'b0;
+//			  
+//		end
+//	
+//		else if(stop_req && (pre_state == TRANSFER))		
+//			tx <= 1'b1;
+//		
+//		else
+//			tx <= tx_buffer[0];
+		
+		if(!rst) begin
+			tx <= 1'b1;
+			done <= 1'b1;
+		end
+		
+		else begin
+			
+			case(pre_state)
+			
+				IDLE:		 begin
+								if(start_req)
+									tx <= 1'b0;
+								else
+									tx <= 1'b1;
+									
+								done <= 1'b0;
+							 end
+		
+					
+				TRANSFER: begin
+						
+								if(stop_req) 
+									tx <= 1'b1;
+								else
+									tx <= tx_buffer[0];
+							 end
+						
+				START:	 begin
+								tx <= tx_buffer[0];
+								
+							 end
+							 
+				STOP:		 begin
+								done <= 1'b1;
+								
+								if(start_req)
+									tx <= 1'b0;
+								else
+									tx <= 1'b1;
+							 end
+				
+				
+				default:	   tx <= 1'b1;
+			
+			endcase
+		end				
+	end
+	
 endmodule
 
 

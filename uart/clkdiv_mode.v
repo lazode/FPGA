@@ -7,13 +7,13 @@ module clkdiv_mode(
 		clk, 
 	   rst_n,
 		
-		div_clk
+		clkout
 	
 );
 	input rst_n;
 	input clk;
 
-	output reg div_clk;
+	output reg clkout;
 	
 	reg [15:0] count;
 	
@@ -24,19 +24,24 @@ module clkdiv_mode(
 		if(!rst_n)	
 		begin
 			count <= 16'b0;
-			div_clk <= 0;
+			clkout <= 0;
 		end
 			
-		else if(count == 16'd162)
+		else if(count == 16'd2604)
 		begin
-			div_clk <= ~div_clk;
-			count <= 16'd0;
+			clkout <= 1'b1;
+			count <= count + 16'd1;
 		end
-		else
+		else if(count == 16'd5208)
 		begin
+			clkout <= 1'b0;
+			count <= 16'd0;
 		
-			count <= count + 1;
+		end
 		
+		else 
+		begin
+			count <= count + 16'd1;
 		end
 	
 	end
