@@ -10,6 +10,7 @@ module spi(
 	addr_in,
 	data_in,
 	
+	data_out,
 	miso,
 	mosi,	
 	cs,
@@ -28,6 +29,7 @@ input miso;
 
 output mosi, sck, cs;
 output done;
+output [7:0] data_out;
 
 reg [6:0] addr;
 reg [7:0] data;
@@ -37,7 +39,7 @@ reg sck;
 reg cs;
 reg done_r;
 reg [7:0] counter;
-
+reg [7:0] data_out = 8'd0;
 
 assign done = done_r;
 
@@ -62,22 +64,24 @@ reg sck_fail;
 reg sck_rise;
 
 
-always @(posedge clk or negedge rst_n) begin	
-	if (!rst_n) begin
-		addr <= 7'd0;
-	end
-	else begin
-		addr <= addr_in;
-		
-	end
-	
-end
+//always @(posedge clk or negedge rst_n) begin	
+//	if (!rst_n) begin
+//		addr <= 7'd0;
+//	end
+//	else begin
+//		addr <= addr_in;
+//		
+//	end
+//	
+//end
 
 
 always @(posedge clk or negedge rst_n) begin
 	if (!rst_n ) begin
 		counter <= 8'd0;
 		data <= 8'd0;
+		addr <= 7'd0;
+		data_out <= 8'd0;
 		
 		cs <= 1'b1;
 		done_r <= 1'b0;
@@ -90,6 +94,7 @@ always @(posedge clk or negedge rst_n) begin
 					if (sck_fail) begin
 						mosi <= RW;
 						data <= data_in;
+						addr <= addr_in;
 						cs <= 1'b0;
 						
 						counter <= counter + 8'd1;
@@ -105,15 +110,18 @@ always @(posedge clk or negedge rst_n) begin
 					end
 				end
 		
-			8:	 counter <= counter + 8'd1;
-			
+			8:	begin
+					if (sck_fail)  
+						counter <= counter + 8'd1;
+				end
+				
 			9, 10, 11, 12, 13, 14, 15, 16:
 				begin
 					if (sck_rise) begin
 						if (!RW)
 							mosi <= data[16 - counter];
 						else
-							data[16 - counter] <= miso;
+							data_out[16 - counter] <= miso;
 							
 						counter <= counter + 8'd1;
 						
@@ -121,10 +129,11 @@ always @(posedge clk or negedge rst_n) begin
 				end
 				
 			 17: begin	
-			 
-					cs <= 1'b1;
-					done_r <= 1'b1;
-					counter <= 8'd0;
+					if (sck_rise) begin
+						cs <= 1'b1;
+						done_r <= 1'b1;
+						counter <= 8'd0;
+					end
 				end
 		endcase
 	end
